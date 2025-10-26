@@ -1,22 +1,47 @@
-import sys, argparse, struct, uuid, binascii, io, datetime
+import argparse
+import binascii
+import datetime
+import io
+import struct
+import uuid
+from typing import (
+    Any,
+    TypeVar,
+    Type,
+    Union,
+    SupportsIndex,
+    Optional,
+    List,
+    Tuple,
+    Dict,
+    BinaryIO,
+)
+
 import yaml
 
 
 __version__ = "0.0.0"
 
 
-def nicehex(x, L):
+def nicehex(x: Union[int, SupportsIndex], L: int) -> str:
     s = hex(x)[2:]
     return s.rjust(L, " ")
 
 
-def repasc(x):
+def repasc(x: int) -> str:
     if x >= 0x20 and x <= 0x7E:
         return chr(x)
     return "."
 
 
-def hexdump(f, offset=0, limit=None, elide=False, lba=False, reverse=False):
+def hexdump(
+    f: BinaryIO,
+    offset: int = 0,
+    limit: Optional[int] = None,
+    elide: bool = False,
+    lba: Union[bool, Tuple[int, int]] = False,
+    reverse: bool = False,
+) -> int:
     if limit is None:
         prev = f.tell()
         f.seek(0, 2)
@@ -43,7 +68,8 @@ def hexdump(f, offset=0, limit=None, elide=False, lba=False, reverse=False):
             if not eliding:
                 eliding = True
                 print(
-                    "*                               **                                             "
+                    "*                               **"
+                    "                                             "
                 )
         else:
             eliding = False
@@ -54,8 +80,6 @@ def hexdump(f, offset=0, limit=None, elide=False, lba=False, reverse=False):
             asc = ""
             for x in d:
                 asc += repasc(x)
-
-            offs = "%08x" % offset
 
             asc = "|" + asc + "|"
             pre = ""
@@ -109,21 +133,21 @@ knownUUIDs = []
 knownUUIDsByName = {}
 
 
-def registerUUID(s, name):
+def registerUUID(s: str, name: str) -> uuid.UUID:
     u = uuid.UUID(s)
     knownUUIDs.append((u, name))
     knownUUIDsByName[name] = u
     return u
 
 
-def resolveUUID(u):
-    for (u2, u2Name) in knownUUIDs:
+def resolveUUID(u: uuid.UUID) -> str:
+    for u2, u2Name in knownUUIDs:
         if u2 == u:
             return u2Name
     return str(u)
 
 
-def lookupUUID(u):
+def lookupUUID(u: str) -> uuid.UUID:
     if u in knownUUIDsByName:
         return knownUUIDsByName[u]
     else:
@@ -179,8 +203,23 @@ mBmHardDriveBootVariableGuid = registerUUID(
 FV_MAGIC = 0x4856465F
 
 
-class UEFITime(object):
-    def __init__(self, t=None):
+UEFITimeT = TypeVar("UEFITimeT", bound="UEFITime")
+
+
+class UEFITime:
+    year: int
+    month: int
+    day: int
+    hour: int
+    minute: int
+    second: int
+    pad1: int
+    nanosecond: int
+    timezone: int
+    daylight: int
+    pad2: int
+
+    def __init__(self, t: Optional[Any] = None):
         if t:
             (
                 self.year,
@@ -224,7 +263,7 @@ class UEFITime(object):
             ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
     @classmethod
-    def deserialize(cls, b):
+    def deserialize(cls: Type[UEFITimeT], b: bytes) -> UEFITimeT:
         o = cls()
         (
             o.year,
@@ -241,7 +280,7 @@ class UEFITime(object):
         ) = struct.unpack("<HBBBBBBIhBB", b)
         return o
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         return struct.pack(
             "<HBBBBBBIhBB",
             self.year,
@@ -258,7 +297,7 @@ class UEFITime(object):
         )
 
     @property
-    def time(self):
+    def time(self) -> Optional[datetime.datetime]:
         if self.year == 0:
             return None
         if self.timezone == 2047:
@@ -277,13 +316,31 @@ class UEFITime(object):
         )
 
 
-class FirmwareVolumeHeader(object):
+FirmwareVolumeHeaderT = TypeVar("FirmwareVolumeHeaderT", bound="FirmwareVolumeHeader")
+
+
+class FirmwareVolumeHeader:
+    vector: bytes
+    fsUUID: uuid.UUID
+    fvLen: int
+    magic: int
+    flags: int
+    hdrLen: int
+    checksum: int
+    extHdrOff: int
+    reserved: int
+    rev: int
+
+    blkInfo: List[Tuple[int, int]]
+
     @classmethod
-    def deserialize(cls, f):
+    def deserialize(
+        cls: Type[FirmwareVolumeHeaderT], f: BinaryIO
+    ) -> FirmwareVolumeHeaderT:
         o = cls()
         (
             o.vector,
-            o.fsUUID,
+            fsUUID,
             o.fvLen,
             o.magic,
             o.flags,
@@ -293,14 +350,14 @@ class FirmwareVolumeHeader(object):
             o.reserved,
             o.rev,
         ) = struct.unpack("<16s16sQIIHHHBB", f.read(56))
-        o.fsUUID = uuid.UUID(bytes=o.fsUUID)
+        o.fsUUID = uuid.UUID(bytes=fsUUID)
 
         if o.magic != FV_MAGIC:
             raise Exception("expected magic, not a EFI_FIRMWARE_VOLUME_HEADER MAGIC")
 
         if o.fsUUID != gEfiSystemNvDataFvGuid:
             raise Exception(
-                "unexpected UUID, not a EFI_FIRMWARE_VOLUME_HEADER: %s" % fsUUID
+                f"unexpected UUID, not a EFI_FIRMWARE_VOLUME_HEADER: {fsUUID}"
             )
 
         o.blkInfo = []
@@ -312,7 +369,7 @@ class FirmwareVolumeHeader(object):
 
         return o
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         b = struct.pack(
             "<16s16sQIIHHHBB",
             self.vector,
@@ -333,7 +390,7 @@ class FirmwareVolumeHeader(object):
         return b
 
     @classmethod
-    def create(cls):
+    def create(cls: Type[FirmwareVolumeHeaderT]) -> FirmwareVolumeHeaderT:
         o = cls()
         o.vector = b"\x00" * 16
         o.fsUUID = gEfiSystemNvDataFvGuid
@@ -348,7 +405,7 @@ class FirmwareVolumeHeader(object):
         o.blkInfo = [(132, 4096)]
         return o
 
-    def print(self):
+    def print(self) -> None:
         print("Firmware Volume Header")
         print("======================")
         print("UUID:                %s" % resolveUUID(self.fsUUID))
@@ -372,15 +429,32 @@ class FirmwareVolumeHeader(object):
         print("")
 
 
-class VariableStoreHeader(object):
+VariableStoreHeaderT = TypeVar("VariableStoreHeaderT", bound="VariableStoreHeader")
+
+
+class VariableStoreHeader:
+    hdrUUID: uuid.UUID
+    len: int
+    fmt: int
+    state: int
+    reserved1: int
+    reserved2: int
+
     @classmethod
-    def deserialize(cls, f):
+    def deserialize(
+        cls: Type[VariableStoreHeaderT], f: BinaryIO
+    ) -> VariableStoreHeaderT:
         o = cls()
 
-        o.hdrUUID, o.len, o.fmt, o.state, o.reserved1, o.reserved2 = struct.unpack(
-            "<16sIBBHI", f.read(28)
-        )
-        o.hdrUUID = uuid.UUID(bytes=o.hdrUUID)
+        (
+            hdrUUID,
+            o.len,
+            o.fmt,
+            o.state,
+            o.reserved1,
+            o.reserved2,
+        ) = struct.unpack("<16sIBBHI", f.read(28))
+        o.hdrUUID = uuid.UUID(bytes=hdrUUID)
 
         if o.hdrUUID != gEfiAuthenticatedVariableGuid:
             raise Exception("unexpected UUID, not a VARIABLE_STORE_HEADER")
@@ -394,7 +468,7 @@ class VariableStoreHeader(object):
 
         return o
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         return struct.pack(
             "<16sIBBHI",
             self.hdrUUID.bytes,
@@ -406,7 +480,7 @@ class VariableStoreHeader(object):
         )
 
     @classmethod
-    def create(cls):
+    def create(cls: Type[VariableStoreHeaderT]) -> VariableStoreHeaderT:
         o = cls()
         o.hdrUUID = gEfiAuthenticatedVariableGuid
         o.len = 262072
@@ -416,7 +490,7 @@ class VariableStoreHeader(object):
         o.reserved2 = 0
         return o
 
-    def print(self):
+    def print(self) -> None:
         print("Variable Store Header")
         print("=====================")
         print("Length:              %s bytes (%.1f KiB)" % (self.len, self.len / 1024))
@@ -426,9 +500,30 @@ class VariableStoreHeader(object):
         print("")
 
 
-class AuthenticatedVariable(object):
+AuthenticatedVariableT = TypeVar(
+    "AuthenticatedVariableT", bound="AuthenticatedVariable"
+)
+
+
+class AuthenticatedVariable:
+    magic: int
+    state: int
+    reserved1: int
+    flags: int
+    monotonicCount: int
+    timestamp: UEFITime
+    pubKeyIdx: int
+    nameLen: int
+    dataLen: int
+    vendorUUID: uuid.UUID
+
+    name: str
+    data: bytes
+
     @classmethod
-    def deserialize(cls, f):
+    def deserialize(
+        cls: Type[AuthenticatedVariableT], f: BinaryIO
+    ) -> Optional[AuthenticatedVariableT]:
         o = cls()
 
         (
@@ -437,20 +532,21 @@ class AuthenticatedVariable(object):
             o.reserved1,
             o.flags,
             o.monotonicCount,
-            o.timestamp,
+            timestamp,
             o.pubKeyIdx,
             o.nameLen,
             o.dataLen,
-            o.vendorUUID,
+            vendorUUID,
         ) = struct.unpack("<HBBIQ16sIII16s", f.read(60))
-        o.vendorUUID = uuid.UUID(bytes=o.vendorUUID)
-        o.timestamp = UEFITime.deserialize(o.timestamp)
+        o.vendorUUID = uuid.UUID(bytes=vendorUUID)
+        o.timestamp = UEFITime.deserialize(timestamp)
 
         if o.magic == 0xFFFF:
             return None
         if o.magic != 0x55AA:
             raise Exception(
-                "unexpected magic (0x%x), not an AUTHENTICATED_VARIABLE_HEADER" % magic
+                "unexpected magic (0x%x), not an AUTHENTICATED_VARIABLE_HEADER"
+                % o.magic
             )
 
         o.name = f.read(o.nameLen).decode("utf-16le").rstrip("\0")
@@ -463,7 +559,9 @@ class AuthenticatedVariable(object):
         return o
 
     @classmethod
-    def deserializeFromDocument(cls, vendorID, name, doc):
+    def deserializeFromDocument(
+        cls: Type[AuthenticatedVariableT], vendorID: str, name: str, doc: Dict[str, Any]
+    ) -> AuthenticatedVariableT:
         o = cls()
         o.magic = 0x55AA
         o.reserved1 = 0
@@ -498,7 +596,7 @@ class AuthenticatedVariable(object):
         o.vendorUUID = lookupUUID(vendorID)
         return o
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         name = self.name.encode("utf-16le")
         assert self.nameLen == len(name) + 2
         assert self.dataLen == len(self.data)
@@ -520,13 +618,12 @@ class AuthenticatedVariable(object):
         return b
 
     @property
-    def isDeleted(self):
+    def isDeleted(self) -> bool:
         state = self.state ^ 0xFF
         return bool(state & 2)
 
-    def print(self):
+    def print(self) -> bool:
         state = self.state ^ 0xFF
-        origState = state
         VAR_IN_DELETED_TRANSITION = 0xFE ^ 0xFF
         VAR_DELETED = 0xFD ^ 0xFF
         VAR_HEADER_VALID_ONLY = 0x7F ^ 0xFF
@@ -550,7 +647,7 @@ class AuthenticatedVariable(object):
                 stext += " | "
             stext += "0x%x" % state
 
-        ftext = []
+        ftext_l = []
         flags = self.flags
         for n, v in (
             ("NON_VOLATILE", 0x1),
@@ -563,9 +660,9 @@ class AuthenticatedVariable(object):
         ):
             if flags & v:
                 flags = flags ^ v
-                ftext.append(n)
+                ftext_l.append(n)
 
-        ftext = " ".join(ftext)
+        ftext = " ".join(ftext_l)
         if flags:
             ftext += " 0x%08x" % flags
 
@@ -586,7 +683,7 @@ class AuthenticatedVariable(object):
         return True
 
 
-def cmdDump(args):
+def cmdDump(args: Dict[str, Any]) -> int:
     with open(args["input-file"], "rb") as f:
         fvh = FirmwareVolumeHeader.deserialize(f)
         fvh.print()
@@ -604,13 +701,15 @@ def cmdDump(args):
     return 0
 
 
-def cmdExport(args):
-    doc = dict(Variables={})
+def cmdExport(args: Dict[str, Any]) -> int:
+    doc: Dict[str, Any] = dict(Variables={})
     docVars = doc["Variables"]
 
     with open(args["input-file"], "rb") as f:
         fvh = FirmwareVolumeHeader.deserialize(f)
         vsh = VariableStoreHeader.deserialize(f)
+        _ = fvh
+        _ = vsh
         while True:
             av = AuthenticatedVariable.deserialize(f)
             if not av:
@@ -619,7 +718,7 @@ def cmdExport(args):
                 continue
             k = resolveUUID(av.vendorUUID)
             docVars.setdefault(k, {})
-            docVars[k][av.name] = x = {}
+            x: Dict[str, Any] = {}
             x["Data"] = av.data
             if av.monotonicCount:
                 x["Monotonic Count"] = av.monotonicCount
@@ -647,12 +746,13 @@ def cmdExport(args):
             t = av.timestamp.time
             if t:
                 x["Timestamp"] = t
+            docVars[k][av.name] = x
 
     print(yaml.dump(doc))
     return 0
 
 
-def cmdCompile(args):
+def cmdCompile(args: Dict[str, Any]) -> int:
     with open(args["input-file"], "r") as f:
         doc = yaml.safe_load(f.read())
 
@@ -666,14 +766,14 @@ def cmdCompile(args):
                 vs.append(av)
 
     with open(args["output-file"], "wb") as fo:
-        fm = io.BytesIO(b"\xFF" * (528 * 1024))
+        fm = io.BytesIO(b"\xff" * (528 * 1024))
         fm.write(FirmwareVolumeHeader.create().serialize())
         fm.write(VariableStoreHeader.create().serialize())
 
         for v in vs:
             fm.write(v.serialize())
             if fm.tell() % 4:
-                fm.write(b"\xFF" * (4 - (fm.tell() % 4)))
+                fm.write(b"\xff" * (4 - (fm.tell() % 4)))
             assert (fm.tell() % 4) == 0
 
         if fm.tell() > 0x41000:
@@ -691,9 +791,9 @@ def cmdCompile(args):
     return 0
 
 
-def cmdGenerateBlank(args):
+def cmdGenerateBlank(args: Dict[str, Any]) -> int:
     with open(args["output-file"], "wb") as fo:
-        fm = io.BytesIO(b"\xFF" * (528 * 1024))
+        fm = io.BytesIO(b"\xff" * (528 * 1024))
         fm.write(FirmwareVolumeHeader.create().serialize())
         fm.write(VariableStoreHeader.create().serialize())
 
@@ -709,7 +809,7 @@ def cmdGenerateBlank(args):
     return 0
 
 
-def run():
+def run() -> Any:
     ap = argparse.ArgumentParser()
     subap = ap.add_subparsers(help="subcommands")
     apDump = subap.add_parser(
