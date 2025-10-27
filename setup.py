@@ -25,6 +25,7 @@ setup(
     author_email="hlandau@devever.net",
     url="https://github.com/hlandau/ovmfvartool",
     packages=["ovmfvartool"],
+    install_requires=["PyYAML"],
     license="GPL3",
     entry_points={
         "console_scripts": [

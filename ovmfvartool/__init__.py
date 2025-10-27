@@ -315,6 +315,10 @@ class UEFITime:
             tz,
         )
 
+    def __eq__(self, other) -> bool:
+        print(("compare uefitime", self.time, other.time, self.time == other.time))
+        return self.time == other.time
+
 
 FirmwareVolumeHeaderT = TypeVar("FirmwareVolumeHeaderT", bound="FirmwareVolumeHeader")
 
@@ -681,6 +685,19 @@ class AuthenticatedVariable:
         hexdump(io.BytesIO(self.data), elide=True)
         print("")
         return True
+
+    def __eq__(self, other) -> bool:
+        return self.magic == other.magic and \
+            self.state == other.state and \
+            self.flags == other.flags and \
+            self.monotonicCount == other.monotonicCount and \
+            self.timestamp == other.timestamp and \
+            self.pubKeyIdx == other.pubKeyIdx and \
+            self.nameLen == other.nameLen and \
+            self.dataLen == other.dataLen and \
+            self.vendorUUID == other.vendorUUID and \
+            self.name == other.name and \
+            self.data == other.data
 
 
 def cmdDump(args: Dict[str, Any]) -> int:
